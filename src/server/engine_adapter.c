@@ -160,12 +160,14 @@ int engine_adapter_execute(EngineAdapter *ea, const char *sql,
      * index/stat fields during index_init/search, so phase 1 uses the write
      * side for every engine call to preserve the single-threaded invariant.
      */
+#ifndef NO_ENGINE_LOCK
     if (pthread_rwlock_wrlock(&ea->lock) != 0) {
         set_error(out, ENGINE_ERR_INTERNAL, "failed to acquire engine lock");
         free(stmt);
         return 0;
     }
     locked = 1;
+#endif
 
     tokens = lexer_tokenize(stmt);
     if (!tokens) {

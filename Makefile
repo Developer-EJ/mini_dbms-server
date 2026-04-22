@@ -35,6 +35,9 @@ $(TARGET): $(SRCS)
 $(SERVER_TARGET): $(SERVER_SRCS)
 	$(CC) $(CFLAGS) -pthread -o $@ $^
 
+sqlpd_nolock: $(SERVER_SRCS)
+	$(CC) $(CFLAGS) -pthread -DNO_ENGINE_LOCK -o $@ $^
+
 # ── 디스크 I/O 시뮬레이션 빌드 (B+ 트리 높이별 시간 비교용) ──
 sim: $(SRCS)
 	$(CC) $(CFLAGS) -DBPTREE_SIMULATE_IO=1 -o sqlp_sim $^
