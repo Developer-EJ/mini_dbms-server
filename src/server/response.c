@@ -55,6 +55,11 @@ static int write_all(int fd, const char *buf, size_t len) {
     return 0;
 }
 
+static int response_write_body(int fd, int status_code,
+                               const char *status_text,
+                               const char *content_type,
+                               const char *body);
+
 static int jb_reserve(JsonBuf *b, size_t extra) {
     if (b->len + extra + 1 <= b->cap)
         return 0;
@@ -137,24 +142,35 @@ static int jb_append_json_string(JsonBuf *b, const char *s) {
 int response_write_json(int fd, int status_code,
                         const char *status_text,
                         const char *json_body) {
+    return response_write_body(fd, status_code, status_text,
+                               "application/json; charset=utf-8",
+                               json_body);
+}
+
+static int response_write_body(int fd, int status_code,
+                               const char *status_text,
+                               const char *content_type,
+                               const char *body) {
     char header[512];
-    size_t body_len = json_body ? strlen(json_body) : 0;
+    size_t body_len = body ? strlen(body) : 0;
     const char *reason = status_text ? status_text : status_text_for(status_code);
 
     int n = snprintf(header, sizeof(header),
                      "HTTP/1.0 %d %s\r\n"
                      "Server: MiniDBMS API Server\r\n"
-                     "Content-Type: application/json; charset=utf-8\r\n"
+                     "Content-Type: %s\r\n"
                      "Content-Length: %zu\r\n"
                      "Connection: close\r\n"
                      "\r\n",
-                     status_code, reason, body_len);
+                     status_code, reason,
+                     content_type ? content_type : "text/plain; charset=utf-8",
+                     body_len);
     if (n < 0 || (size_t)n >= sizeof(header))
         return -1;
 
     if (write_all(fd, header, (size_t)n) != 0)
         return -1;
-    if (body_len > 0 && write_all(fd, json_body, body_len) != 0)
+    if (body_len > 0 && write_all(fd, body, body_len) != 0)
         return -1;
     return 0;
 }
@@ -208,32 +224,118 @@ static const char *engine_error_code(const EngineResult *r) {
     }
 }
 
-static int append_result_set(JsonBuf *b, const ResultSet *rs) {
-    if (jb_append(b, "{\"ok\":true,\"type\":\"select\",\"columns\":[") != 0)
-        return -1;
+static int display_width(const char *s) {
+    int width = 0;
+    const unsigned char *p = (const unsigned char *)(s ? s : "");
 
-    if (rs) {
-        for (int c = 0; c < rs->col_count; c++) {
-            if (c > 0 && jb_append(b, ",") != 0) return -1;
-            if (jb_append_json_string(b, rs->col_names[c]) != 0) return -1;
+    while (*p) {
+        if ((*p & 0x80) == 0x00) {
+            width += 1;
+            p += 1;
+        } else if ((*p & 0xE0) == 0xC0) {
+            width += 2;
+            p += 2;
+        } else if ((*p & 0xF0) == 0xE0) {
+            width += 2;
+            p += 3;
+        } else if ((*p & 0xF8) == 0xF0) {
+            width += 2;
+            p += 4;
+        } else {
+            width += 1;
+            p += 1;
         }
     }
 
-    if (jb_append(b, "],\"rows\":[") != 0) return -1;
-    if (rs) {
+    return width;
+}
+
+static int append_spaces(JsonBuf *b, int count) {
+    for (int i = 0; i < count; i++) {
+        if (jb_append(b, " ") != 0) return -1;
+    }
+    return 0;
+}
+
+static int append_table_text(JsonBuf *b, const char *s) {
+    if (!s) s = "";
+
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+        char ch = (char)*p;
+        if (ch == '\n' || ch == '\r' || ch == '\t')
+            ch = ' ';
+        if (jb_append_n(b, &ch, 1) != 0)
+            return -1;
+    }
+
+    return 0;
+}
+
+static int append_separator(JsonBuf *b, const int *widths, int col_count) {
+    for (int c = 0; c < col_count; c++) {
+        if (jb_append(b, "+") != 0) return -1;
+        for (int i = 0; i < widths[c] + 2; i++) {
+            if (jb_append(b, "-") != 0) return -1;
+        }
+    }
+    return jb_append(b, "+\n");
+}
+
+static int append_cell(JsonBuf *b, const char *text, int width) {
+    int pad = width - display_width(text);
+    if (pad < 0) pad = 0;
+
+    if (jb_append(b, "| ") != 0) return -1;
+    if (append_table_text(b, text) != 0) return -1;
+    if (append_spaces(b, pad + 1) != 0) return -1;
+    return 0;
+}
+
+static int append_result_table(JsonBuf *b, const ResultSet *rs) {
+    if (!rs || rs->col_count <= 0) {
+        return jb_append(b, "(0 rows)\n");
+    }
+
+    int *widths = (int *)calloc((size_t)rs->col_count, sizeof(int));
+    if (!widths) return -1;
+
+    for (int c = 0; c < rs->col_count; c++) {
+        widths[c] = display_width(rs->col_names[c]);
         for (int r = 0; r < rs->row_count; r++) {
-            if (r > 0 && jb_append(b, ",") != 0) return -1;
-            if (jb_append(b, "[") != 0) return -1;
-            for (int c = 0; c < rs->rows[r].count; c++) {
-                if (c > 0 && jb_append(b, ",") != 0) return -1;
-                if (jb_append_json_string(b, rs->rows[r].values[c]) != 0)
-                    return -1;
+            if (c < rs->rows[r].count) {
+                int w = display_width(rs->rows[r].values[c]);
+                if (w > widths[c]) widths[c] = w;
             }
-            if (jb_append(b, "]") != 0) return -1;
         }
     }
 
-    return jb_appendf(b, "],\"row_count\":%d}", rs ? rs->row_count : 0);
+    int rc = -1;
+    if (append_separator(b, widths, rs->col_count) != 0) goto done;
+
+    for (int c = 0; c < rs->col_count; c++) {
+        if (append_cell(b, rs->col_names[c], widths[c]) != 0) goto done;
+    }
+    if (jb_append(b, "|\n") != 0) goto done;
+    if (append_separator(b, widths, rs->col_count) != 0) goto done;
+
+    for (int r = 0; r < rs->row_count; r++) {
+        for (int c = 0; c < rs->col_count; c++) {
+            const char *value = "";
+            if (c < rs->rows[r].count)
+                value = rs->rows[r].values[c];
+            if (append_cell(b, value, widths[c]) != 0) goto done;
+        }
+        if (jb_append(b, "|\n") != 0) goto done;
+    }
+
+    if (append_separator(b, widths, rs->col_count) != 0) goto done;
+    if (jb_appendf(b, "(%d rows)\n", rs->row_count) != 0) goto done;
+
+    rc = 0;
+
+done:
+    free(widths);
+    return rc;
 }
 
 int response_write_engine_result(int fd, const EngineResult *r) {
@@ -249,7 +351,7 @@ int response_write_engine_result(int fd, const EngineResult *r) {
     int rc = -1;
 
     if (r->is_select) {
-        if (append_result_set(&b, r->rows) != 0)
+        if (append_result_table(&b, r->rows) != 0)
             goto done;
     } else {
         if (jb_appendf(&b,
@@ -259,7 +361,11 @@ int response_write_engine_result(int fd, const EngineResult *r) {
             goto done;
     }
 
-    rc = response_write_json(fd, 200, "OK", b.data);
+    if (r->is_select)
+        rc = response_write_body(fd, 200, "OK",
+                                 "text/plain; charset=utf-8", b.data);
+    else
+        rc = response_write_json(fd, 200, "OK", b.data);
 
 done:
     free(b.data);

@@ -1,6 +1,6 @@
 # sqlpd 사용법
 
-미니 DBMS HTTP API 서버. 기존 SQL 엔진 앞에 HTTP 레이어를 얹어, curl로 SQL을 보내면 JSON으로 결과를 돌려준다.
+미니 DBMS HTTP API 서버. 기존 SQL 엔진 앞에 HTTP 레이어를 얹어, curl로 SQL을 보내면 SELECT는 터미널에서 읽기 좋은 표로, INSERT/에러는 JSON으로 결과를 돌려준다.
 
 ---
 
@@ -84,7 +84,12 @@ curl http://localhost:8080/sql -d 'SELECT * FROM users;'
 성공 응답:
 
 ```
-{"ok":true,"type":"select","columns":["id","name","age","email"],"rows":[["1","alice","30","alice@example.com"]],"row_count":1}
++----+-------+-----+-------------------+
+| id | name  | age | email             |
++----+-------+-----+-------------------+
+| 1  | alice | 30  | alice@example.com |
++----+-------+-----+-------------------+
+(1 rows)
 ```
 
 ### SELECT (WHERE)
