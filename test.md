@@ -15,6 +15,9 @@ make
 make seed_users
 ```
 
+```
+ab -n 100 -c 10 "http://127.0.0.1:8080/sql?sql=SELECT%20*%20FROM%20users%3B"
+```
 # 데이터 초기화
 ```
 make clear_users
@@ -42,12 +45,9 @@ make seed_users ROWS=20000
 터미널 B:
 
 ```bash
-# 워밍업 1회
-curl -s "http://127.0.0.1:8080/sql?sql=SELECT%20*%20FROM%20users%20WHERE%20id%20%3D%20500000%3B" > /dev/null
-
 # point read 부하 테스트
-ab -n 10000 -c 100 \
-  "http://127.0.0.1:8080/sql?sql=SELECT%20*%20FROM%20users%20WHERE%20id%20%3D%20500000%3B"
+ab -n 1000 -c 100 \
+  "http://127.0.0.1:8080/sql?sql=SELECT%20*%20FROM%20users%3B"
 ```
 
 ## 2. READ 테스트 - 멀티 worker
@@ -91,7 +91,7 @@ printf "INSERT INTO users VALUES (1, 'bench_user1', 21, 'bench_user1@example.com
 
 ```bash
 # write 부하 테스트
-ab -n 100000 -c 100 \
+ab -n 20000 -c 100 \
   -p /tmp/insert.sql \
   -T "text/plain" \
   http://127.0.0.1:8080/sql
