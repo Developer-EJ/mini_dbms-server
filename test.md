@@ -90,8 +90,11 @@ printf "INSERT INTO users VALUES (1, 'bench_user1', 21, 'bench_user1@example.com
 터미널 B:
 
 ```bash
+#초기화
+make clear_users
+
 # write 부하 테스트
-ab -n 20000 -c 100 \
+ab -n 10000 -c 100 \
   -p /tmp/insert.sql \
   -T "text/plain" \
   http://127.0.0.1:8080/sql
@@ -99,6 +102,7 @@ ab -n 20000 -c 100 \
 # INSERT row 수 확인
 wc -l data/users.dat
 ```
+
 
 ## 4. WRITE 테스트 - 멀티 worker
 
