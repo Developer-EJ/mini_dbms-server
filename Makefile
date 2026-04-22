@@ -59,6 +59,18 @@ perf_sim: $(PERF_SRCS)
 gen_data: tools/gen_data.c
 	$(CC) $(CFLAGS) -o gen_data $^
 
+ROWS ?= 1000000
+USERS_DATA ?= data/users.dat
+
+seed_users: gen_data
+	@mkdir -p data
+	./gen_data $(ROWS) $(USERS_DATA)
+
+clear_users:
+	@mkdir -p data
+	@: > $(USERS_DATA)
+	@echo "cleared $(USERS_DATA)"
+
 # ── 단위 테스트 ────────────────────────────────────────────
 TEST_BINS = test_bptree test_index test_parser test_schema test_executor
 
@@ -108,4 +120,4 @@ test_executor: tests/test_executor.c  \
 clean:
 	rm -f $(TARGET) $(SERVER_TARGET) sqlp_sim $(TEST_BINS) test_perf test_perf_sim gen_data
 
-.PHONY: all sim perf perf_sim gen_data test clean
+.PHONY: all sim perf perf_sim test clean seed_users clear_users

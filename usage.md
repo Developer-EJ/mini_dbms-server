@@ -27,14 +27,24 @@ mkdir -p data
 : > data/users.dat
 ```
 
+부하 테스트용 대용량 데이터는 명령어로 만들고 지울 수 있다:
+
+```
+make seed_users                 # 기본 1,000,000 rows 생성
+make seed_users ROWS=100000     # 100,000 rows 생성
+make clear_users                # data/users.dat 비우기
+```
+
 스키마는 `schema/users.schema`에 정의돼 있다:
 
-| 컬럼  | 타입          |
-|-------|---------------|
-| id    | INT           |
-| name  | VARCHAR(64)   |
-| age   | INT           |
-| email | VARCHAR(128)  |
+
+| 컬럼    | 타입           |
+| ----- | ------------ |
+| id    | INT          |
+| name  | VARCHAR(64)  |
+| age   | INT          |
+| email | VARCHAR(128) |
+
 
 ---
 
@@ -124,14 +134,16 @@ curl -i http://localhost:8080/sql -d 'SELECT * FROM users;'
 {"ok":false,"error":{"code":"...","message":"..."}}
 ```
 
-| 상황                          | HTTP | code                      |
-|-------------------------------|------|---------------------------|
-| 잘못된 SQL                    | 400  | `BAD_SQL`                 |
-| body/SQL 누락                 | 400  | `BAD_REQUEST`             |
-| 없는 테이블                   | 404  | `SCHEMA_NOT_FOUND`        |
-| 없는 경로 (`/sql` 외)         | 404  | `NOT_FOUND`               |
-| 지원 안 하는 SQL (UPDATE 등)  | 501  | `SQL_NOT_IMPLEMENTED`     |
-| 큐 포화                       | 503  | `SERVICE_UNAVAILABLE`     |
+
+| 상황                     | HTTP | code                  |
+| ---------------------- | ---- | --------------------- |
+| 잘못된 SQL                | 400  | `BAD_SQL`             |
+| body/SQL 누락            | 400  | `BAD_REQUEST`         |
+| 없는 테이블                 | 404  | `SCHEMA_NOT_FOUND`    |
+| 없는 경로 (`/sql` 외)       | 404  | `NOT_FOUND`           |
+| 지원 안 하는 SQL (UPDATE 등) | 501  | `SQL_NOT_IMPLEMENTED` |
+| 큐 포화                   | 503  | `SERVICE_UNAVAILABLE` |
+
 
 확인해 보기:
 
@@ -160,4 +172,58 @@ curl http://localhost:8080/sql -d 'SELECT * FROM users WHERE id = 2;'
 curl http://localhost:8080/sql -d 'SELECT * FROM users WHERE age BETWEEN 20 AND 35;'
 
 # 터미널 A에서 Ctrl+C
+```
+
+# 100만 rows 생성
+
+```
+make seed_users
+```
+
+# 원하는 row 수로 생성
+
+```
+make seed_users ROWS=20000
+```
+
+# users 데이터 비우기
+
+```
+make clear_users
+```
+
+# ab write 비교용 명령어
+
+# 1. 데이터 초기화
+```
+make clear_users
+```
+# 2. INSERT body 파일 생성
+```
+printf "INSERT INTO users VALUES (1, 'bench_user', 31, 'bench_user@example.com');" > /tmp/insert.sql
+```
+# 3. 싱글 worker 서버 실행
+```
+./sqlpd 8080 1 128
+```
+
+# 4. ab 쓰기 테스트
+```
+ab -n 100000 -c 100 \
+  -p /tmp/insert.sql \
+  -T "text/plain" \
+  http://127.0.0.1:8080/sql
+```
+# 5. 멀티 worker 비교용
+# 위 서버를 Ctrl+C로 끈 뒤 실행
+```
+make clear_users
+./sqlpd 8080 8 128
+```
+# 6. 같은 ab 테스트 반복
+```
+ab -n 100000 -c 100 \
+  -p /tmp/insert.sql \
+  -T "text/plain" \
+  http://127.0.0.1:8080/sql
 ```
